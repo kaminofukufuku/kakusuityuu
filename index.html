@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>角錘柱ハウスメーカー (窓・ドア追加対応)</title>
+    <style>
+        :root {
+            --bg: #f5f7fa;
+            --panel: #ffffff;
+            --text: #333333;
+            --border: #e2e8f0;
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #17a2b8;
+        }
+        * { box-sizing: border-box; font-family: 'Segoe UI', Meiryo, sans-serif; }
+        body { margin: 0; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; }
+        
+        /* Layout */
+        .sidebar { width: 340px; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; z-index: 10; flex-shrink: 0; }
+        .main-content { flex: 1; display: flex; flex-direction: row; position: relative; overflow: hidden; }
+        .view-box { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .view-box.svg-box { flex: 3; border-right: 1px solid var(--border); }
+        .view-box.3d-box { flex: 1; min-width: 250px; }
+        .view-title { margin: 0; font-size: 14px; background: var(--panel); border-bottom: 1px solid var(--border); padding: 10px 15px; font-weight: bold; color: #475569; display: flex; justify-content: space-between; align-items: center; }
+        
+        .canvas-container { flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center; background: #e5e7eb; position: relative; padding: 20px;}
+        #preview3d { flex: 1; background: #1a1a1a; display: block; }
+        
+        /* SVG */
+        svg { background: white; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); user-select: none; }
+        
+        /* Controls */
+        .control-group { padding: 12px 15px; border-bottom: 1px solid var(--border); }
+        .control-group h3 { margin: 0 0 10px 0; font-size: 13px; color: #64748b; }
+        .input-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .input-row label { font-size: 12px; font-weight: bold; }
+        .input-row input[type="number"], .input-row select { width: 85px; padding: 4px; border: 1px solid var(--border); border-radius: 4px; text-align: right; font-size: 12px; }
+        .input-row select { text-align: left; }
+        
+        .slider-row { display: flex; flex-direction: column; margin-bottom: 10px; }
+        .slider-row label { font-size: 12px; font-weight: bold; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .slider-row input[type="range"] { width: 100%; cursor: pointer; }
+        
+        /* Buttons */
+        .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 12px 15px; border-bottom: 1px solid var(--border); }
+        button { padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: opacity 0.2s; font-size: 12px; color: white; display: flex; align-items: center; justify-content: center; gap: 4px; }
+        button:hover { opacity: 0.8; }
+        
+        .btn-win { background: var(--primary); }
+        .btn-door { background: var(--info); }
+        .btn-dup { background: var(--warning); color: #333; }
+        .btn-del { background: var(--danger); }
+        .btn-pdf { background: #28a745; grid-column: span 2; padding: 10px; font-size: 14px;}
+        .btn-svg { background: var(--success); }
+        .btn-dxf { background: var(--warning); color: #333; }
+
+        /* SVG Handles */
+        .delete-group { cursor: pointer; }
+        .delete-group .delete-icon { fill: var(--danger); }
+        .delete-group:hover .delete-icon { fill: #a71d2a; }
+        .window-rect, .resize-handle, .move-handle, .delete-btn { touch-action: none; }
+
+        /* Print Styles */
+        @media print {
+            body { display: block; height: auto; overflow: visible; background: white; }
+            .sidebar, .view-title, .view-box.3d-box, .print-hidden { display: none !important; }
+            .main-content { width: 100%; display: block; flex-direction: column; }
+            .svg-box { border: none !important; }
+            .canvas-container { padding: 0; background: white; display: block; overflow: visible; justify-content: flex-start; align-items: flex-start; }
+            svg { box-shadow: none; transform: none !important; margin: 0; }
+            @page { size: auto; margin: 0; }
+        }
+    </style>
+    <!-- 3D表示用 Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div class="sidebar">
+        <div class="control-group">
+            <h3>寸法設定 (mm)</h3>
+            <div class="input-row">
+                <label>角数 (3〜20)</label>
+                <input type="number" id="sides" value="6" min="3" max="20" onchange="updateAll()">
+            </div>
+            <div class="input-row">
+                <label>一辺の寸法 (a)</label>
+                <input type="number" id="baseLength" value="40" min="10" onchange="updateAll()">
+            </div>
+            <div class="input-row">
+                <label>角柱の高さ (hPrism)</label>
+                <input type="number" id="prismHeight" value="50" min="0" onchange="updateAll()">
+            </div>
+            <div class="input-row">
+                <label>角錐の高さ (hPyr)</label>
+                <input type="number" id="pyramidHeight" value="40" min="5" onchange="updateAll()">
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h3>のり代角度調整</h3>
+            <div class="slider-row">
+                <label><span>上部頂上側</span><span id="topApexVal">45°</span></label>
+                <input type="range" id="topApexAngle" min="0" max="90" value="45" step="1" oninput="updateAll()">
+            </div>
+            <div class="slider-row">
+                <label><span>上部軒先側</span><span id="topBaseVal">45°</span></label>
+                <input type="range" id="topBaseAngle" min="0" max="90" value="45" step="1" oninput="updateAll()">
+            </div>
+            <div class="slider-row">
+                <label><span>下部縦ライン</span><span id="bottomAngleVal">45°</span></label>
+                <input type="range" id="bottomAngle" min="0" max="90" value="45" step="1" oninput="updateAll()">
+            </div>
+        </div>
+
+        <div class="control-group">
+            <h3>窓・ドア設定</h3>
+            <div class="input-row">
+                <label>窓の形状</label>
+                <select id="win-shape">
+                    <option value="rect">長方形</option>
+                    <option value="diamond">ひし形</option>
+                    <option value="grid2x2">2x2小窓</option>
+                    <option value="round-top">上部丸</option>
+                    <option value="circle">円・楕円</option>
+                </select>
+            </div>
+            <div class="input-row">
+                <label>ドアの形状</label>
+                <select id="door-shape">
+                    <option value="rect">長方形</option>
+                    <option value="round-top">上部丸</option>
+                </select>
+            </div>
+            <div class="input-row">
+                <label>ドアヒンジ方向</label>
+                <select id="door-dir">
+                    <option value="right">右</option>
+                    <option value="left">左</option>
+                    <option value="bottom">下</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="btn-grid">
+            <button class="btn-win" onclick="addWindow()">+ 窓を追加</button>
+            <button class="btn-door" onclick="addDoor()">+ ドアを追加</button>
+            <button class="btn-dup" onclick="duplicateLast()">複製 (最後)</button>
+            <button class="btn-del" onclick="removeLastWindow()">削除 (最後)</button>
+        </div>
+
+        <div class="btn-grid" style="border-bottom: none;">
+            <button class="btn-pdf" onclick="printPDF()">🖨️ PDF印刷 / 印刷</button>
+            <button class="btn-svg" onclick="exportSVG()">SVG保存</button>
+            <button class="btn-dxf" onclick="exportDXF()">DXF保存</button>
+        </div>
+    </div>
+
+    <div class="main-content">
+        <div class="view-box svg-box">
+            <div class="view-title">
+                <span>📄 2D展開図 <span id="netDimensions" style="color:var(--primary); font-size: 12px; margin-left: 8px; font-weight: normal;"></span></span>
+                <div>
+                    倍率: 
+                    <select id="scaleSelect" onchange="updateAll()" style="padding: 2px;">
+                        <option value="fit">全体表示</option>
+                        <option value="0.5">50%</option>
+                        <option value="0.75">75%</option>
+                        <option value="1" selected>100%</option>
+                        <option value="1.25">125%</option>
+                        <option value="1.5">150%</option>
+                        <option value="2">200%</option>
+                    </select>
+                </div>
+            </div>
+            <div class="canvas-container" id="svg-container">
+                <div id="svg-preview"></div>
+            </div>
+        </div>
+        
+        <div class="view-box 3d-box">
+            <div class="view-title">🧊 3D完成イメージ (ドラッグで回転)</div>
+            <div id="preview3d"></div>
+        </div>
+    </div>
+
+    <script>
+        // === 状態管理変数 ===
+        let currentScale = 1;
+        let lastValidState = {};
+        let cutLines = [];
+        let foldLines = [];
+        let windows = []; 
+        let minX = 0, minY = 0, maxX = 0, maxY = 0;
+        
+        let dragInfo = { index: -1, mode: null, offsetX: 0, offsetY: 0, startMouseX: 0, startMouseY: 0, startW: 0, startH: 0, startClientX: 0, startClientY: 0 };
+        let snapGuides = { x: [], y: [] }; 
+        let lastWinSize = { w: 15, h: 15 };
+        let lastDoorSize = { w: 16, h: 24 };
+
+        // === Three.js 初期化 ===
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a1a);
+        const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        let controls;
+        let meshGroup = new THREE.Group();
+        scene.add(meshGroup);
+        
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(100, 200, 50);
+        scene.add(dirLight);
+
+        function init3D() {
+            const container = document.getElementById('preview3d');
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            container.appendChild(renderer.domElement);
+            camera.position.set(0, 150, 250);
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enablePan = true;
+            controls.target.set(0, 50, 0);
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+            animate3D();
+        }
+
+        function animate3D() {
+            requestAnimationFrame(animate3D);
+            if(controls) controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // === ユーティリティ・座標計算 ===
+        function getInputs() {
+            return {
+                n: Math.max(3, Math.min(20, parseInt(document.getElementById('sides').value) || 6)),
+                a: Math.max(10, parseFloat(document.getElementById('baseLength').value) || 40),
+                hPrism: Math.max(0, parseFloat(document.getElementById('prismHeight').value) || 50),
+                hPyr: Math.max(5, parseFloat(document.getElementById('pyramidHeight').value) || 40),
+                topApexAngle: parseFloat(document.getElementById('topApexAngle').value),
+                topBaseAngle: parseFloat(document.getElementById('topBaseAngle').value),
+                bottomAngle: parseFloat(document.getElementById('bottomAngle').value),
+                scale: document.getElementById('scaleSelect').value
+            };
+        }
+
+        function getParallelTabPoints(p1, p2, targetWidth, angleStartDeg, angleEndDeg) {
+            const dx = p2.x - p1.x;
+            const dy = p2.y - p1.y;
+            const len = Math.hypot(dx, dy);
+            if (len === 0) return [p1, p1];
+
+            const dirX = dx / len, dirY = dy / len;
+            const normX = -dirY, normY = dirX; // 外側への法線
+
+            let tanStart = Math.tan(angleStartDeg * Math.PI / 180);
+            let tanEnd = Math.tan(angleEndDeg * Math.PI / 180);
+            let insetStart = targetWidth * tanStart;
+            let insetEnd = targetWidth * tanEnd;
+            let actualWidth = targetWidth;
+
+            if (insetStart + insetEnd > len) {
+                actualWidth = len / (tanStart + tanEnd);
+                insetStart = actualWidth * tanStart;
+                insetEnd = actualWidth * tanEnd;
+            }
+
+            const outerP1 = { x: p1.x + normX * actualWidth + dirX * insetStart, y: p1.y + normY * actualWidth + dirY * insetStart };
+            const outerP2 = { x: p2.x + normX * actualWidth - dirX * insetEnd,   y: p2.y + normY * actualWidth - dirY * insetEnd };
+
+            return [outerP1, outerP2];
+        }
+
+        function addCut(p1, p2) { cutLines.push({x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y}); }
+        function addFold(p1, p2) { foldLines.push({x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y}); }
+        function addTab(p1, p2, width, angleStart, angleEnd) {
+            const pts = getParallelTabPoints(p1, p2, width, angleStart, angleEnd);
+            addCut(p1, pts[0]);
+            addCut(pts[0], pts[1]);
+            addCut(pts[1], p2);
+            addFold(p1, p2);
+        }
+
+        // === 領域判定 (窓・ドアが面内に収まるか) ===
+        function checkPlacement(win) {
+            const { n, a, hPrism, hPyr } = getInputs();
+            const g = 2; // バッファ 2mm
+            const rin = a / (2 * Math.tan(Math.PI / n));
+            const slantL = Math.sqrt(hPyr * hPyr + rin * rin);
+            
+            const rot = (win.rotation || 0) % 180;
+            const bboxW = rot === 0 ? win.w : win.h;
+            const bboxH = rot === 0 ? win.h : win.w;
+            const bx = win.x + win.w / 2 - bboxW / 2;
+            const by = win.y + win.h / 2 - bboxH / 2;
+
+            let pts = [];
+            let steps = 5; // 四隅と中間点をサンプリング
+            for (let i = 0; i <= steps; i++) {
+                for (let j = 0; j <= steps; j++) {
+                    pts.push({x: bx + bboxW * (i/steps), y: by + bboxH * (j/steps)});
+                }
+            }
+            
+            function checkPoint(px, py) {
+                let i = Math.floor(px / a);
+                if (i < 0 || i >= n) return 'OUT';
+                
+                let xRel = px - i * a;
+                let xC = xRel - a / 2; // 面の中心からのX相対距離 (-a/2 ~ a/2)
+
+                // 左右の隣接面境界チェック
+                if (xRel < g || xRel > a - g) return 'TAB';
+
+                // 角柱部
+                if (py <= -g && py >= -hPrism + g) {
+                    return 'OK';
+                }
+                
+                // 角錐部
+                if (py < -hPrism - g && py >= -hPrism - slantL + g) {
+                    let yPyr = -py - hPrism; // 底辺からの高さ (正)
+                    
+                    // 三角形の内側か判定
+                    let max_y = slantL * (1 - Math.abs(xC) / (a/2));
+                    if (yPyr > max_y) return 'OUT';
+
+                    // 斜辺から g だけ内側か判定
+                    let A = 2 * slantL / a;
+                    // 斜辺の方程式からの距離 d = | A*|xC| + yPyr - slantL | / sqrt(A^2 + 1)
+                    let dist = Math.abs(A * Math.abs(xC) + yPyr - slantL) / Math.sqrt(A*A + 1);
+                    
+                    if (dist >= g) {
+                        return 'OK';
+                    }
+                    return 'TAB';
+                }
+                
+                // 面境界・折り目付近 (-hPrism周辺, 0周辺)
+                if (py > -g || (py < -hPrism + g && py > -hPrism - g)) return 'TAB'; 
+                
+                return 'OUT';
+            }
+
+            let hasOut = false;
+            let hasTab = false;
+            for (let pt of pts) {
+                let s = checkPoint(pt.x, pt.y);
+                if (s === 'OUT') hasOut = true;
+                if (s === 'TAB') hasTab = true;
+            }
+            if (hasOut) return 'OUT';
+            if (hasTab) return 'TAB';
+            return 'OK';
+        }
+
+        // === 窓・ドアの形状パス生成 (回転考慮) ===
+        function getTransformedPoints(win) {
+            const cx = win.x + win.w / 2;
+            const cy = win.y + win.h / 2;
+            const rad = ((win.rotation || 0) * Math.PI) / 180;
+            const cos = Math.cos(rad);
+            const sin = Math.sin(rad);
+
+            function rot(px, py) {
+                const dx = px - cx;
+                const dy = py - cy;
+                return {
+                    x: cx + dx * cos - dy * sin,
+                    y: cy + dx * sin + dy * cos
+                };
+            }
+
+            let mainPts = [], hingePts = [], extraPaths = [];
+
+            if (win.shape === 'diamond') {
+                let rawMain = [
+                    { x: cx, y: win.y }, { x: win.x + win.w, y: cy },
+                    { x: cx, y: win.y + win.h }, { x: win.x, y: cy }, { x: cx, y: win.y }
+                ];
+                mainPts = rawMain.map(p => rot(p.x, p.y));
+            } else if (win.shape === 'grid2x2') {
+                const gap = Math.min(Math.min(win.w, win.h) * 0.3, Math.max(0.8, Math.min(win.w, win.h) * 0.12));
+                const cellW = (win.w - gap) / 2, cellH = (win.h - gap) / 2;
+                if (cellW > 0 && cellH > 0) {
+                    const rects = [
+                        { x: win.x, y: win.y }, { x: win.x + cellW + gap, y: win.y },
+                        { x: win.x, y: win.y + cellH + gap }, { x: win.x + cellW + gap, y: win.y + cellH + gap }
+                    ];
+                    rects.forEach((r, idx) => {
+                        let pts = [
+                            {x: r.x, y: r.y}, {x: r.x + cellW, y: r.y},
+                            {x: r.x + cellW, y: r.y + cellH}, {x: r.x, y: r.y + cellH}, {x: r.x, y: r.y}
+                        ].map(p => rot(p.x, p.y));
+                        if (idx === 0) mainPts = pts; else extraPaths.push(pts);
+                    });
+                }
+            } else if (win.shape === 'circle') {
+                const rx = win.w / 2, ry = win.h / 2;
+                let rawMain = [];
+                for (let i = 0; i <= 32; i++) {
+                    const theta = (i / 32) * 2 * Math.PI;
+                    rawMain.push({ x: cx + rx * Math.cos(theta), y: cy + ry * Math.sin(theta) });
+                }
+                mainPts = rawMain.map(p => rot(p.x, p.y));
+            } else if (win.shape === 'round-top') {
+                const r = win.w / 2;
+                let rawMain = [], rawHinge = [];
+                if (win.type === 'door') {
+                    if (win.dir === 'left') {
+                        rawMain.push({x: win.x, y: win.y+win.h}, {x: win.x+win.w, y: win.y+win.h}, {x: win.x+win.w, y: win.y+r});
+                        for(let i=0; i<=16; i++){ const t = (i/16)*Math.PI; rawMain.push({ x: win.x+r+r*Math.cos(t), y: win.y+r-r*Math.sin(t) }); }
+                        rawHinge.push({x: win.x, y: win.y+r}, {x: win.x, y: win.y+win.h});
+                    } else if (win.dir === 'right') {
+                        rawMain.push({x: win.x+win.w, y: win.y+win.h}, {x: win.x, y: win.y+win.h}, {x: win.x, y: win.y+r});
+                        for(let i=0; i<=16; i++){ const t = Math.PI-(i/16)*Math.PI; rawMain.push({ x: win.x+r+r*Math.cos(t), y: win.y+r-r*Math.sin(t) }); }
+                        rawHinge.push({x: win.x+win.w, y: win.y+r}, {x: win.x+win.w, y: win.y+win.h});
+                    } else { 
+                        rawMain.push({x: win.x, y: win.y+win.h}, {x: win.x, y: win.y+r});
+                        for(let i=0; i<=16; i++){ const t = Math.PI-(i/16)*Math.PI; rawMain.push({ x: win.x+r+r*Math.cos(t), y: win.y+r-r*Math.sin(t) }); }
+                        rawMain.push({x: win.x+win.w, y: win.y+win.h});
+                        rawHinge.push({x: win.x, y: win.y+win.h}, {x: win.x+win.w, y: win.y+win.h});
+                    }
+                } else { 
+                    rawMain.push({x: win.x, y: win.y+win.h}, {x: win.x+win.w, y: win.y+win.h}, {x: win.x+win.w, y: win.y+r});
+                    for(let i=0; i<=16; i++){ const t = (i/16)*Math.PI; rawMain.push({ x: win.x+r+r*Math.cos(t), y: win.y+r-r*Math.sin(t) }); }
+                    rawMain.push({x: win.x, y: win.y+win.h});
+                }
+                mainPts = rawMain.map(p => rot(p.x, p.y));
+                hingePts = rawHinge.map(p => rot(p.x, p.y));
+            } else { 
+                let rawMain = [], rawHinge = [];
+                if (win.type === 'door') {
+                    if (win.dir === 'left') {
+                        rawMain.push({x: win.x, y: win.y+win.h}, {x: win.x+win.w, y: win.y+win.h}, {x: win.x+win.w, y: win.y}, {x: win.x, y: win.y});
+                        rawHinge.push({x: win.x, y: win.y}, {x: win.x, y: win.y+win.h});
+                    } else if (win.dir === 'right') {
+                        rawMain.push({x: win.x+win.w, y: win.y+win.h}, {x: win.x, y: win.y+win.h}, {x: win.x, y: win.y}, {x: win.x+win.w, y: win.y});
+                        rawHinge.push({x: win.x+win.w, y: win.y}, {x: win.x+win.w, y: win.y+win.h});
+                    } else { 
+                        rawMain.push({x: win.x, y: win.y+win.h}, {x: win.x, y: win.y}, {x: win.x+win.w, y: win.y}, {x: win.x+win.w, y: win.y+win.h});
+                        rawHinge.push({x: win.x, y: win.y+win.h}, {x: win.x+win.w, y: win.y+win.h});
+                    }
+                } else { 
+                    rawMain = [{x: win.x, y: win.y}, {x: win.x+win.w, y: win.y}, {x: win.x+win.w, y: win.y+win.h}, {x: win.x, y: win.y+win.h}, {x: win.x, y: win.y}];
+                }
+                mainPts = rawMain.map(p => rot(p.x, p.y));
+                hingePts = rawHinge.map(p => rot(p.x, p.y));
+            }
+
+            return { mainPts, hingePts, extraPaths };
+        }
+
+        // === 窓・ドア管理関数 ===
+        function addWindow() {
+            const { a, hPrism } = getInputs();
+            const shape = document.getElementById('win-shape').value;
+            const w = lastWinSize.w, h = lastWinSize.h;
+            // 面0の中央付近に初期配置
+            const startX = a / 2 - w / 2;
+            const startY = -hPrism / 2 - h / 2;
+            
+            const proposed = { type: 'window', shape, w, h, x: startX, y: startY, rotation: 0 };
+            if (checkPlacement(proposed) !== 'OUT') { windows.push(proposed); updateAll(); }
+            else alert('初期位置に配置できませんでした。サイズを確認してください。');
+        }
+
+        function addDoor() {
+            const { a, hPrism } = getInputs();
+            const shape = document.getElementById('door-shape').value;
+            const dir = document.getElementById('door-dir').value;
+            const w = lastDoorSize.w, h = lastDoorSize.h;
+            // 面0の底辺付近に初期配置
+            const startX = a / 2 - w / 2;
+            const startY = -h - 2; 
+            
+            const proposed = { type: 'door', shape, dir, w, h, x: startX, y: startY, rotation: 0 };
+            if (checkPlacement(proposed) !== 'OUT') { windows.push(proposed); updateAll(); }
+            else alert('初期位置に配置できませんでした。サイズを確認してください。');
+        }
+
+        function duplicateLast() {
+            if (windows.length === 0) return;
+            const last = windows[windows.length - 1];
+            const proposed = { ...last, x: last.x + 5, y: last.y - 5 };
+            if (checkPlacement(proposed) !== 'OUT') { windows.push(proposed); updateAll(); }
+        }
+
+        function removeLastWindow() { if (windows.length > 0) { windows.pop(); updateAll(); } }
+        function deleteWindowAtIndex(idx) { if (idx >= 0 && idx < windows.length) { windows.splice(idx, 1); updateAll(); } }
+
+        // === マウス・タッチ操作 (ドラッグ＆ドロップ) ===
+        function getBBox(win) {
+            const rot = (win.rotation || 0) % 180;
+            const bboxW = rot === 0 ? win.w : win.h;
+            const bboxH = rot === 0 ? win.h : win.w;
+            const bboxX = win.x + win.w / 2 - bboxW / 2;
+            const bboxY = win.y + win.h / 2 - bboxH / 2;
+            return { x: bboxX, y: bboxY, w: bboxW, h: bboxH, cx: bboxX + bboxW/2, cy: bboxY + bboxH/2, right: bboxX + bboxW, bottom: bboxY + bboxH };
+        }
+
+        function startDrag(e) {
+            let targetEl = null;
+            if (e.target && e.target.classList) {
+                if (e.target.classList.contains('delete-btn')) targetEl = e.target;
+                else if (e.target.classList.contains('resize-handle')) targetEl = e.target;
+                else if (e.target.classList.contains('window-rect')) targetEl = e.target;
+                else if (e.target.closest && e.target.closest('.move-handle')) targetEl = e.target.closest('.move-handle');
+            }
+            if (!targetEl) return;
+            if (e.cancelable) e.preventDefault();
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+            if (targetEl.classList.contains('delete-btn')) {
+                e.stopPropagation();
+                deleteWindowAtIndex(parseInt(targetEl.getAttribute('data-index')));
+                return;
+            }
+
+            const svg = document.getElementById('papercraft-svg');
+            const CTM = svg.querySelector('g#base-lines').getScreenCTM();
+            dragInfo.index = parseInt(targetEl.getAttribute('data-index'));
+            let win = windows[dragInfo.index];
+
+            if (targetEl.classList.contains('resize-handle')) {
+                e.stopPropagation();
+                dragInfo.mode = 'resize';
+                dragInfo.offsetX = (clientX - CTM.e) / CTM.a; 
+                dragInfo.offsetY = (clientY - CTM.f) / CTM.d; 
+                dragInfo.startMouseX = dragInfo.offsetX;
+                dragInfo.startMouseY = dragInfo.offsetY;
+                dragInfo.startW = win.w; dragInfo.startH = win.h;
+            } else {
+                dragInfo.mode = 'move';
+                dragInfo.offsetX = (clientX - CTM.e) / CTM.a - win.x;
+                dragInfo.offsetY = (clientY - CTM.f) / CTM.d - win.y;
+            }
+            dragInfo.startClientX = clientX; dragInfo.startClientY = clientY;
+        }
+
+        function moveDrag(e) {
+            if (dragInfo.index >= 0) {
+                if (e.cancelable) e.preventDefault();
+                const svg = document.getElementById('papercraft-svg');
+                const CTM = svg.querySelector('g#base-lines').getScreenCTM();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                let currentMouseX = (clientX - CTM.e) / CTM.a;
+                let currentMouseY = (clientY - CTM.f) / CTM.d;
+                let win = windows[dragInfo.index];
+                
+                snapGuides = { x: [], y: [] };
+
+                if (dragInfo.mode === 'move') {
+                    let newX = currentMouseX - dragInfo.offsetX;
+                    let newY = currentMouseY - dragInfo.offsetY;
+                    
+                    const snapThreshold = 1.5;
+                    let curBox = getBBox({ ...win, x: newX, y: newY });
+
+                    windows.forEach((otherWin, idx) => {
+                        if (idx === dragInfo.index) return;
+                        let oBox = getBBox(otherWin);
+                        const xAligns = [ {cur: curBox.x, other: oBox.x}, {cur: curBox.right, other: oBox.right}, {cur: curBox.cx, other: oBox.cx} ];
+                        for (let align of xAligns) {
+                            if (Math.abs(align.cur - align.other) < snapThreshold) {
+                                newX -= (align.cur - align.other);
+                                snapGuides.x.push(align.other); break;
+                            }
+                        }
+                        const yAligns = [ {cur: curBox.y, other: oBox.y}, {cur: curBox.bottom, other: oBox.bottom}, {cur: curBox.cy, other: oBox.cy} ];
+                        for (let align of yAligns) {
+                            if (Math.abs(align.cur - align.other) < snapThreshold) {
+                                newY -= (align.cur - align.other);
+                                snapGuides.y.push(align.other); break;
+                            }
+                        }
+                    });
+
+                    let proposed = { ...win, x: newX, y: newY };
+                    if (checkPlacement(proposed) !== 'OUT') {
+                        win.x = newX; win.y = newY;
+                    } else {
+                        if (checkPlacement({ ...win, x: newX }) !== 'OUT') win.x = newX;
+                        if (checkPlacement({ ...win, y: newY }) !== 'OUT') win.y = newY;
+                    }
+                    generateSVG(); // 即時反映
+                } else if (dragInfo.mode === 'resize') {
+                    let deltaX = currentMouseX - dragInfo.startMouseX;
+                    let deltaY = currentMouseY - dragInfo.startMouseY;
+                    
+                    // 回転角度の逆行列を適用し、ローカルの幅・高さの増分に変換
+                    const rad = ((win.rotation || 0) * Math.PI) / 180;
+                    const cos = Math.cos(-rad);
+                    const sin = Math.sin(-rad);
+                    
+                    let deltaW = deltaX * cos - deltaY * sin;
+                    let deltaH = deltaX * sin + deltaY * cos;
+                    
+                    let newW = dragInfo.startW + deltaW;
+                    let newH = dragInfo.startH + deltaH;
+                    
+                    if (win.shape === 'round-top') { newW = Math.max(4, newW); newH = Math.max(newW/2 + 2, newH); }
+                    else if (win.shape === 'grid2x2') { newW = Math.max(6, newW); newH = Math.max(6, newH); }
+                    else { newW = Math.max(3, newW); newH = Math.max(3, newH); }
+                    
+                    let proposed = { ...win, w: newW, h: newH };
+                    if (checkPlacement(proposed) !== 'OUT') {
+                        win.w = newW; win.h = newH;
+                        if (win.type === 'door') lastDoorSize = { w: newW, h: newH }; else lastWinSize = { w: newW, h: newH };
+                    }
+                    generateSVG(); // 即時反映
+                }
+            }
+        }
+
+        function endDrag(e) {
+            if (dragInfo.index >= 0 && dragInfo.mode === 'move') {
+                const clientX = e && e.changedTouches ? e.changedTouches[0].clientX : (e ? e.clientX : dragInfo.startClientX);
+                const clientY = e && e.changedTouches ? e.changedTouches[0].clientY : (e ? e.clientY : dragInfo.startClientY);
+                const dist = Math.hypot(clientX - dragInfo.startClientX, clientY - dragInfo.startClientY);
+                
+                // クリック判定で回転
+                if (dist < 3) {
+                    let win = windows[dragInfo.index];
+                    let proposed = { ...win, rotation: ((win.rotation || 0) + 270) % 360 }; // 左に90度回転
+                    if (checkPlacement(proposed) !== 'OUT') win.rotation = proposed.rotation;
+                }
+            }
+            if (dragInfo.index >= 0) {
+                dragInfo.index = -1; dragInfo.mode = null; snapGuides = { x: [], y: [] };
+                updateAll(); // 3Dも含めて最終更新
+            }
+        }
+
+        document.addEventListener('mousedown', startDrag, { passive: false });
+        document.addEventListener('mousemove', moveDrag, { passive: false });
+        document.addEventListener('mouseup', endDrag);
+        document.addEventListener('touchstart', startDrag, { passive: false });
+        document.addEventListener('touchmove', moveDrag, { passive: false });
+        document.addEventListener('touchend', endDrag);
+
+
+        // === メインロジック更新 (SVG & 3D) ===
+        function updateAll() {
+            const inputs = getInputs();
+            const { n, a, hPrism, hPyr, topApexAngle, topBaseAngle, bottomAngle, scale } = inputs;
+            
+            document.getElementById('topApexVal').textContent = topApexAngle + '°';
+            document.getElementById('topBaseVal').textContent = topBaseAngle + '°';
+            document.getElementById('bottomAngleVal').textContent = bottomAngle + '°';
+            currentScale = scale;
+
+            cutLines = []; foldLines = [];
+            const tabWidth = 5;
+            const rin = a / (2 * Math.tan(Math.PI / n));
+            const slantL = Math.sqrt(hPyr * hPyr + rin * rin);
+
+            // 展開図パス生成
+            const WallBottoms = [], WallTops = [], Apexes = [];
+            for (let i = 0; i <= n; i++) {
+                WallBottoms.push({ x: i * a, y: 0 });
+                WallTops.push({ x: i * a, y: -hPrism });
+            }
+            for (let i = 0; i < n; i++) {
+                Apexes.push({ x: (i + 0.5) * a, y: -hPrism - slantL });
+            }
+
+            for (let i = 0; i < n; i++) addCut(WallBottoms[i], WallBottoms[i+1]);
+            addTab(WallBottoms[n], WallTops[n], tabWidth, bottomAngle, bottomAngle);
+            for (let i = 0; i < n; i++) {
+                addTab(WallTops[i+1], Apexes[i], tabWidth, topBaseAngle, topApexAngle);
+                addCut(Apexes[i], WallTops[i]);
+                addFold(WallTops[i], WallTops[i+1]);
+            }
+            addCut(WallTops[0], WallBottoms[0]);
+            for (let i = 1; i < n; i++) addFold(WallBottoms[i], WallTops[i]);
+
+            // サイズチェック
+            minX = Infinity; minY = Infinity; maxX = -Infinity; maxY = -Infinity;
+            const allLines = [...cutLines, ...foldLines];
+            allLines.forEach(l => {
+                minX = Math.min(minX, l.x1, l.x2); maxX = Math.max(maxX, l.x1, l.x2);
+                minY = Math.min(minY, l.y1, l.y2); maxY = Math.max(maxY, l.y1, l.y2);
+            });
+            const width = maxX - minX;
+            const height = maxY - minY;
+
+            // 完成寸法の計算 (タテ×ヨコ×高さ)
+            const rout = a / (2 * Math.sin(Math.PI / n));
+            let minX_3D = Infinity, maxX_3D = -Infinity, minZ_3D = Infinity, maxZ_3D = -Infinity;
+            for (let i = 0; i < n; i++) {
+                const angle = Math.PI/n + i * 2 * Math.PI / n;
+                const x3d = rout * Math.cos(angle);
+                const z3d = rout * Math.sin(angle);
+                minX_3D = Math.min(minX_3D, x3d);
+                maxX_3D = Math.max(maxX_3D, x3d);
+                minZ_3D = Math.min(minZ_3D, z3d);
+                maxZ_3D = Math.max(maxZ_3D, z3d);
+            }
+            const w3d = Math.round(maxX_3D - minX_3D); // ヨコ
+            const d3d = Math.round(maxZ_3D - minZ_3D); // タテ
+            const h3d = Math.round(hPrism + hPyr);     // 高さ
+
+            document.getElementById('netDimensions').textContent = `(展開図: ${Math.round(width)}×${Math.round(height)} mm ｜ 完成: タテ${d3d}×ヨコ${w3d}×高さ${h3d} mm)`;
+
+            lastValidState = { n, a, hPrism, hPyr };
+
+            // 窓・ドアの領域外チェックと補正
+            for (let i = windows.length - 1; i >= 0; i--) {
+                if (checkPlacement(windows[i]) !== 'OK') {
+                    // 面0の中央に移動してみる
+                    windows[i].x = a / 2 - windows[i].w / 2;
+                    windows[i].y = -hPrism / 2 - windows[i].h / 2;
+                    if (checkPlacement(windows[i]) !== 'OK') {
+                        windows.splice(i, 1); // それでもダメなら削除
+                    }
+                }
+            }
+
+            generateSVG();
+            update3D();
+        }
+
+        // SVG描画
+        function generateSVG() {
+            const width = maxX - minX;
+            const height = maxY - minY;
+            const isFit = currentScale === 'fit';
+            const zoom = isFit ? 1 : parseFloat(currentScale);
+            const dispWidth = (width + 20) * zoom;
+            const dispHeight = (height + 20) * zoom;
+
+            let sizeAttr = "";
+            if (isFit) {
+                sizeAttr = `width="100%" height="100%" style="max-width: 100%; max-height: 100%;"`;
+            } else {
+                sizeAttr = `width="${dispWidth}mm" height="${dispHeight}mm"`;
+            }
+
+            let cutPathData = "", foldPathData = "";
+            cutLines.forEach(l => cutPathData += `M ${l.x1.toFixed(3)},${l.y1.toFixed(3)} L ${l.x2.toFixed(3)},${l.y2.toFixed(3)} `);
+            foldLines.forEach(l => foldPathData += `M ${l.x1.toFixed(3)},${l.y1.toFixed(3)} L ${l.x2.toFixed(3)},${l.y2.toFixed(3)} `);
+
+            let windowSVG = "";
+            windows.forEach((win, index) => {
+                const { mainPts, hingePts, extraPaths } = getTransformedPoints(win);
+                function ptsToD(pts) { if (!pts || !pts.length) return ""; return "M " + pts.map(p => `${p.x} ${p.y}`).join(" L "); }
+                if (mainPts.length) windowSVG += `<path d="${ptsToD(mainPts)}" fill="none" stroke="black" stroke-width="0.8" stroke-linejoin="round"/>`;
+                if (hingePts && hingePts.length) windowSVG += `<path d="${ptsToD(hingePts)}" fill="none" stroke="#ff00ff" stroke-width="0.8" />`;
+                if (extraPaths) extraPaths.forEach(p => windowSVG += `<path d="${ptsToD(p)}" fill="none" stroke="black" stroke-width="0.8" />`);
+
+                const rot = (win.rotation || 0) % 180;
+                const bboxW = rot === 0 ? win.w : win.h, bboxH = rot === 0 ? win.h : win.w;
+                const bboxX = win.x + win.w/2 - bboxW/2, bboxY = win.y + win.h/2 - bboxH/2;
+                const cx = bboxX + bboxW/2, cy = bboxY + bboxH/2;
+
+                windowSVG += `
+                    <rect class="window-rect print-hidden" data-index="${index}" x="${bboxX}" y="${bboxY}" width="${bboxW}" height="${bboxH}" fill="transparent" stroke="none" style="pointer-events:all; cursor:move;" />
+                    <g class="move-handle print-hidden" data-index="${index}" style="pointer-events:all; cursor:move;">
+                        <circle cx="${cx}" cy="${cy}" r="4" fill="rgba(255,255,255,0.7)" stroke="#666" stroke-width="0.5" style="pointer-events:none;"/>
+                        <path d="M ${cx} ${cy-2} L ${cx} ${cy+2} M ${cx-2} ${cy} L ${cx+2} ${cy}" stroke="#333" stroke-width="1" style="pointer-events:none;"/>
+                    </g>
+                    <rect class="resize-handle print-hidden" data-index="${index}" x="${bboxX+bboxW-2.5}" y="${bboxY+bboxH-2.5}" width="5" height="5" fill="white" stroke="black" stroke-width="0.5" style="pointer-events:all; cursor:se-resize;" />
+                    <g class="delete-group print-hidden" style="pointer-events:all;">
+                        <circle class="delete-btn delete-icon" data-index="${index}" cx="${bboxX}" cy="${bboxY}" r="3" style="pointer-events:all;" />
+                        <line x1="${bboxX-1.5}" y1="${bboxY-1.5}" x2="${bboxX+1.5}" y2="${bboxY+1.5}" stroke="white" stroke-width="0.8" style="pointer-events:none;" />
+                        <line x1="${bboxX+1.5}" y1="${bboxY-1.5}" x2="${bboxX-1.5}" y2="${bboxY+1.5}" stroke="white" stroke-width="0.8" style="pointer-events:none;" />
+                    </g>`;
+            });
+
+            let guideLinesSVG = "";
+            snapGuides.x.forEach(sx => guideLinesSVG += `<line class="print-hidden" x1="${sx}" y1="${minY-10}" x2="${sx}" y2="${maxY+10}" stroke="#007bff" stroke-width="0.3" stroke-dasharray="2 2" />`);
+            snapGuides.y.forEach(sy => guideLinesSVG += `<line class="print-hidden" x1="${minX-10}" y1="${sy}" x2="${maxX+10}" y2="${sy}" stroke="#007bff" stroke-width="0.3" stroke-dasharray="2 2" />`);
+
+            const svgContent = `
+                <svg id="papercraft-svg" xmlns="http://www.w3.org/2000/svg" 
+                     viewBox="${minX - 10} ${minY - 10} ${width + 20} ${height + 20}" 
+                     ${sizeAttr}>
+                    <g id="base-lines">
+                        <path d="${foldPathData}" stroke="red" stroke-width="0.5" fill="none" />
+                        <path d="${cutPathData}" stroke="black" stroke-width="0.5" fill="none" stroke-linecap="round" />
+                    </g>
+                    <g id="windows">
+                        ${windowSVG}
+                    </g>
+                    ${guideLinesSVG}
+                </svg>
+            `;
+            document.getElementById('svg-preview').innerHTML = svgContent;
+        }
+
+        // 2D座標(x, y)から3D空間座標へのマッピング
+        function map2DTo3D(px, py, offset = 0.5) {
+            const { n, a, hPrism, hPyr } = getInputs();
+            let i = Math.floor(px / a);
+            if (i < 0) i = 0; if (i >= n) i = n - 1;
+
+            const rin = a / (2 * Math.tan(Math.PI / n));
+            const rout = a / (2 * Math.sin(Math.PI / n));
+            const slantL = Math.sqrt(hPyr * hPyr + rin * rin);
+            const offsetAngle = Math.PI / n;
+            const angle1 = offsetAngle + i * 2 * Math.PI / n;
+            const angle2 = offsetAngle + (i + 1) * 2 * Math.PI / n;
+
+            const vBase1 = new THREE.Vector3(rout * Math.cos(angle1), 0, rout * Math.sin(angle1));
+            const vBase2 = new THREE.Vector3(rout * Math.cos(angle2), 0, rout * Math.sin(angle2));
+
+            const U = new THREE.Vector3().subVectors(vBase2, vBase1).normalize();
+            const M = new THREE.Vector3().addVectors(vBase1, vBase2).multiplyScalar(0.5);
+            let xRel = px - i * a;
+
+            if (py >= -hPrism) { // 角柱部
+                const N = new THREE.Vector3(U.z, 0, -U.x).normalize();
+                let pt = new THREE.Vector3().copy(vBase1);
+                pt.addScaledVector(U, xRel);
+                pt.y = -py; 
+                pt.addScaledVector(N, offset);
+                return pt;
+            } else { // 角錐部
+                const Apex = new THREE.Vector3(0, hPrism + hPyr, 0);
+                M.y = hPrism; 
+                const Vup = new THREE.Vector3().subVectors(Apex, M);
+                
+                // UとVupの外積で法線を求めるが、右手の法則に従い (Vup x U) の順序で外側を向かせる
+                const N = new THREE.Vector3().crossVectors(Vup, U).normalize();
+
+                let yPyr = -py - hPrism;
+                let xRelCenter = xRel - a/2;
+
+                let pt = new THREE.Vector3().copy(M);
+                pt.addScaledVector(U, xRelCenter);
+                pt.addScaledVector(Vup, yPyr / slantL);
+                pt.addScaledVector(N, offset);
+                return pt;
+            }
+        }
+
+        // 3D更新
+        function update3D() {
+            meshGroup.clear();
+            const { n, a, hPrism, hPyr } = getInputs();
+            const rout = a / (2 * Math.sin(Math.PI / n));
+            
+            // 本体メッシュ作成
+            const geom = new THREE.BufferGeometry();
+            const pts = [];
+            const vBase = [], vMid = [];
+            const offsetAngle = Math.PI/n;
+            
+            for (let i = 0; i < n; i++) {
+                const angle = offsetAngle + i * 2 * Math.PI / n;
+                const x = rout * Math.cos(angle);
+                const z = rout * Math.sin(angle);
+                vBase.push(new THREE.Vector3(x, 0, z));
+                vMid.push(new THREE.Vector3(x, hPrism, z));
+            }
+            const apex = new THREE.Vector3(0, hPrism + hPyr, 0);
+
+            for (let i = 0; i < n; i++) {
+                const next = (i + 1) % n;
+                pts.push(vBase[i], vBase[next], vMid[i]);
+                pts.push(vBase[next], vMid[next], vMid[i]);
+                pts.push(vMid[i], vMid[next], apex);
+            }
+            const vertices = new Float32Array(pts.length * 3);
+            pts.forEach((p, idx) => { vertices[idx*3] = p.x; vertices[idx*3+1] = p.y; vertices[idx*3+2] = p.z; });
+            geom.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geom.computeVertexNormals();
+
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+            const mesh = new THREE.Mesh(geom, material);
+            const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: 0x333333 }));
+            meshGroup.add(mesh);
+            meshGroup.add(edges);
+
+            // 窓・ドアの3Dマッピング描画
+            function create3DLineFrom2D(pts2d, colorHex) {
+                let pts3d = [];
+                const step = 2; // 細分化ステップ(mm)
+                for(let i = 0; i < pts2d.length - 1; i++) {
+                    let p1 = pts2d[i], p2 = pts2d[i+1];
+                    let dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+                    let count = Math.max(1, Math.ceil(dist / step));
+                    for(let j = 0; j < count; j++) {
+                        let tx = p1.x + (p2.x - p1.x) * (j/count);
+                        let ty = p1.y + (p2.y - p1.y) * (j/count);
+                        pts3d.push(map2DTo3D(tx, ty, 0.5));
+                    }
+                }
+                let lastP = pts2d[pts2d.length-1];
+                pts3d.push(map2DTo3D(lastP.x, lastP.y, 0.5));
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(pts3d);
+                return new THREE.Line(lineGeo, new THREE.LineBasicMaterial({ color: colorHex, linewidth: 2 }));
+            }
+
+            windows.forEach(win => {
+                let winGroup = new THREE.Group();
+                const { mainPts, hingePts, extraPaths } = getTransformedPoints(win);
+                if (mainPts.length) winGroup.add(create3DLineFrom2D(mainPts, 0x000000));
+                if (hingePts && hingePts.length) winGroup.add(create3DLineFrom2D(hingePts, 0xff00ff));
+                if (extraPaths) extraPaths.forEach(p => winGroup.add(create3DLineFrom2D(p, 0x000000)));
+                meshGroup.add(winGroup);
+            });
+        }
+
+        // === 各種出力処理 ===
+        function printPDF() {
+            const scaleSelect = document.getElementById('scaleSelect');
+            const prevScale = scaleSelect.value;
+            scaleSelect.value = "1"; // 100%出力
+            updateAll();
+            
+            setTimeout(() => {
+                window.print();
+                setTimeout(() => { scaleSelect.value = prevScale; updateAll(); }, 500);
+            }, 100);
+        }
+
+        function exportSVG() {
+            const svgEl = document.getElementById('papercraft-svg').cloneNode(true);
+            svgEl.querySelectorAll('.print-hidden').forEach(el => el.remove());
+            const blob = new Blob([svgEl.outerHTML], {type: "image/svg+xml;charset=utf-8"});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "papercraft_net_with_windows.svg";
+            link.click();
+        }
+
+        function exportDXF() {
+            let dxf = `0\nSECTION\n2\nENTITIES\n`;
+            function addDxfLine(x1, y1, x2, y2, layer, color) {
+                dxf += `0\nLINE\n8\n${layer}\n62\n${color}\n`;
+                dxf += `10\n${x1.toFixed(3)}\n20\n${(-y1).toFixed(3)}\n`; // Y軸反転
+                dxf += `11\n${x2.toFixed(3)}\n21\n${(-y2).toFixed(3)}\n`;
+            }
+            cutLines.forEach(l => addDxfLine(l.x1, l.y1, l.x2, l.y2, 'CUT', 7));
+            foldLines.forEach(l => addDxfLine(l.x1, l.y1, l.x2, l.y2, 'SCORE', 1));
+
+            windows.forEach(win => {
+                const { mainPts, hingePts, extraPaths } = getTransformedPoints(win);
+                function addDxfPath(pts, layer, color) {
+                    for(let i=0; i<pts.length-1; i++) addDxfLine(pts[i].x, pts[i].y, pts[i+1].x, pts[i+1].y, layer, color);
+                }
+                if (mainPts.length) addDxfPath(mainPts, 'CUT', 7);
+                if (hingePts && hingePts.length) addDxfPath(hingePts, 'SCORE', 1); // ヒンジは赤(SCORE)出力
+                if (extraPaths) extraPaths.forEach(p => addDxfPath(p, 'CUT', 7));
+            });
+
+            dxf += `0\nENDSEC\n0\nEOF\n`;
+            const blob = new Blob([dxf], {type: "text/plain;charset=utf-8"});
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "papercraft_net_with_windows.dxf";
+            link.click();
+        }
+
+        // 初期化
+        window.onload = () => {
+            init3D();
+            updateAll();
+        };
+    </script>
+</body>
+</html>
